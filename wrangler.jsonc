@@ -1,0 +1,23 @@
+{
+	"name": "cookie-scanner",
+	"main": "src/index.js",
+	"compatibility_date": "2026-05-26",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"observability": {
+		"enabled": true
+	},
+	"browser": {
+		"binding": "MYBROWSER"
+	},
+	"d1_databases": [
+		{
+			"binding": "cookie_scanner_db",
+			"database_name": "cookie-scanner-db",
+			"database_id": "388953ef-d171-46f6-9bb6-733f193a68b1",
+			"remote": true
+			
+		}
+	]
+}
