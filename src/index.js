@@ -387,19 +387,21 @@ export default {
 
 
 		// Get cookies
-		const cookiesBefore =	await context.cookies();
-		await page.waitForTimeout(5000);
-		const cookiesAfter =await context.cookies();
-		const cookieMap = new Map();
+		// const cookiesBefore =	await context.cookies();
+		// await page.waitForTimeout(5000);
+		// const cookiesAfter =await context.cookies();
+		// const cookieMap = new Map();
 
-		[...cookiesBefore, ...cookiesAfter].forEach(cookie => {
-			cookieMap.set(
-				cookie.name,
-				cookie
-			);
+		// [...cookiesBefore, ...cookiesAfter].forEach(cookie => {
+		// 	cookieMap.set(
+		// 		cookie.name,
+		// 		cookie
+		// 	);
 
-		});
-		const cookies =[...cookieMap.values()];
+		// });
+		// const cookies =[...cookieMap.values()];
+		const cookies = await context.cookies();
+		
 
 		let counts ={necessary: 0, advertisement: 0,analytics: 0, functional: 0, other: 0};
 
