@@ -349,17 +349,17 @@ export default {
 		// open website
 		await page.goto(targetUrl, {
 			waitUntil: "domcontentloaded",
-			timeout: 25000
+			timeout: 45000
 		});
 
 		try {
-			await page.waitForLoadState("networkidle", { timeout: 6000 });
+			await page.waitForLoadState("networkidle", { timeout: 15000 });
 		} catch (e) {
 			console.log("Network never went idle (expected on tracker-heavy sites) — continuing");
 		}
 
 		// wait for delayed cookies
-		await page.waitForTimeout(7000);
+		await page.waitForTimeout(20000);
 
 
 		console.log("Response Cookies:", responseCookies.length);
@@ -511,7 +511,21 @@ export default {
 			}
 		}
 
-		// 2) fall back to a broad generic accept button
+		// 2) try known ConsentBit selectors (clean CSS — most reliable)
+		if (!consentClicked) {
+			try {
+				const cbBtn = await page.$("#accept-btn, .cb-cookie-accept-btn");
+				if (cbBtn) {
+					await cbBtn.click();
+					consentClicked = true;
+					console.log("Accepted via ConsentBit selector");
+				}
+			} catch (e) {
+				console.log("ConsentBit selector click failed:", e.message);
+			}
+		}
+
+		// 3) fall back to a broad generic accept button
 		if (!consentClicked) {
 			try {
 				const acceptBtn = await page.$(`
@@ -526,9 +540,9 @@ export default {
 					button:has-text("OK"),
 					a:has-text("Accept all"),
 					a:has-text("Accept"),
-					[id*="accept" i],
-					[class*="accept" i],
-					[aria-label*="accept" i]
+					[id*="accept"],
+					[class*="accept"],
+					[aria-label*="accept"]
 				`);
 				if (acceptBtn) {
 					await acceptBtn.click();
@@ -571,13 +585,13 @@ export default {
 
 			for (const link of links) {
 				// stop crawling if we're running low on the 60s budget
-				if (timeLeft() < 15000) {
+				if (timeLeft() < 10000) {
 					console.log("Skipping remaining crawl — near 60s deadline");
 					break;
 				}
 				try {
-					await page.goto(link, { waitUntil: "domcontentloaded", timeout: 12000 });
-					await page.waitForTimeout(2500);   // let that page's tags fire
+					await page.goto(link, { waitUntil: "domcontentloaded", timeout: 8000 });
+					await page.waitForTimeout(1500);   // let that page's tags fire
 				} catch (e) {
 					console.log("Skip page:", link, e.message);
 				}
