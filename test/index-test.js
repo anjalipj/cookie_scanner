@@ -283,6 +283,11 @@ export default {
 
 		const targetUrl = body.url;
 
+		// scan deadline — hard cap the whole scan at 60s
+		const scanStart = Date.now();
+		const SCAN_DEADLINE_MS = 60000;
+		const timeLeft = () => SCAN_DEADLINE_MS - (Date.now() - scanStart);
+
 		// Launch browser
 		browser = await launch(env.MYBROWSER, {
 			args: [
@@ -344,17 +349,17 @@ export default {
 		// open website
 		await page.goto(targetUrl, {
 			waitUntil: "domcontentloaded",
-			timeout: 45000
+			timeout: 25000
 		});
 
 		try {
-			await page.waitForLoadState("networkidle", { timeout: 15000 });
+			await page.waitForLoadState("networkidle", { timeout: 6000 });
 		} catch (e) {
 			console.log("Network never went idle (expected on tracker-heavy sites) — continuing");
 		}
 
 		// wait for delayed cookies
-		await page.waitForTimeout(20000);
+		await page.waitForTimeout(7000);
 
 
 		console.log("Response Cookies:", responseCookies.length);
@@ -539,28 +544,40 @@ export default {
 
 		// ---- wait for unlocked tracking scripts to set their cookies ----
 		if (consentClicked) {
-			await page.waitForTimeout(10000);
+			await page.waitForTimeout(5000);
 		}
 
 		// ---- crawl a few internal pages to collect more cookies (CookieYes-style) ----
 		try {
 			const origin = new URL(targetUrl).origin;
 
-			// collect same-site links from the homepage
+			// collect same-site links from the homepage (distinct paths, no #/mailto/tel)
 			const links = await page.evaluate((origin) => {
-				return [...new Set(
-					[...document.querySelectorAll("a[href]")]
-						.map(a => a.href)
-						.filter(h => h.startsWith(origin))
-				)].slice(0, 4);   // cap at 4 pages to stay within Worker CPU/time limits
+				const seen = new Set();
+				const out = [];
+				for (const a of document.querySelectorAll("a[href]")) {
+					const h = a.href;
+					if (!h.startsWith(origin)) continue;
+					if (h.includes("#") || h.startsWith("mailto:") || h.startsWith("tel:")) continue;
+					const path = new URL(h).pathname;
+					if (path === "/" || seen.has(path)) continue;
+					seen.add(path);
+					out.push(h);
+				}
+				return out.slice(0, 2);   // cap at 2 pages to stay under 60s
 			}, origin);
 
 			console.log("Crawling internal pages:", links.length);
 
 			for (const link of links) {
+				// stop crawling if we're running low on the 60s budget
+				if (timeLeft() < 15000) {
+					console.log("Skipping remaining crawl — near 60s deadline");
+					break;
+				}
 				try {
-					await page.goto(link, { waitUntil: "domcontentloaded", timeout: 30000 });
-					await page.waitForTimeout(4000);   // let that page's tags fire
+					await page.goto(link, { waitUntil: "domcontentloaded", timeout: 12000 });
+					await page.waitForTimeout(2500);   // let that page's tags fire
 				} catch (e) {
 					console.log("Skip page:", link, e.message);
 				}
