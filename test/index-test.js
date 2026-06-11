@@ -191,6 +191,76 @@ export default {
 	}
 
 
+	//...parsecookies function...
+	function parseSetCookie(setCookieStr, responseUrl) {
+		const results = [];
+		const lines = setCookieStr.split("\n");
+
+		for (const line of lines) {
+			const parts = line.split(";").map(p => p.trim());
+			if (!parts[0] || !parts[0].includes("=")) continue;
+
+			const [rawName, ...valParts] = parts[0].split("=");
+
+			const cookie = {
+				name: rawName.trim(),
+				value: valParts.join("="),
+				domain: "",
+				path: "/",
+				expires: -1, // session cookie by default
+				httpOnly: false,
+				secure: false,
+				sameSite: "Lax"
+			};
+
+	    for (let i = 1; i < parts.length; i++) {
+	      const [k, v] = parts[i].split("=");
+	      const key = (k || "").toLowerCase().trim();
+	      const val = (v || "").trim();
+
+	      switch (key) {
+	        case "domain":
+	          cookie.domain = val.replace(/^\./, "");
+	          break;
+	        case "path":
+	          cookie.path = val;
+	          break;
+	        case "expires":
+	          // convert to unix seconds to match context.cookies() format
+	          try {
+	            const t = Date.parse(val);
+	            if (!isNaN(t)) cookie.expires = Math.floor(t / 1000);
+	          } catch {}
+	          break;
+	        case "max-age":
+	          // max-age is relative seconds; we can't compute absolute without "now",
+	          // so just store it so you know it's persistent
+	          cookie.maxAge = parseInt(val, 10);
+	          break;
+	        case "httponly":
+	          cookie.httpOnly = true;
+	          break;
+	        case "secure":
+	          cookie.secure = true;
+	          break;
+	        case "samesite":
+	          cookie.sameSite = val || "Lax";
+	          break;
+	      }
+	    }
+
+	    if (!cookie.domain && responseUrl) {
+	      try { cookie.domain = new URL(responseUrl).hostname.replace(/^www\./, ""); } catch {}
+	    }
+
+	    results.push(cookie);
+	  }
+
+	  return results;
+	}
+
+
+
 	let browser;
     try {
 
@@ -252,23 +322,24 @@ export default {
 		//getting cookies in header
 		const responseCookies = [];
 		page.on("response", async (response) => {
-			const headers = response.headers();
+		try {
+			const headers = await response.allHeaders();   // async + includes set-cookie
 
 			if (headers["set-cookie"]) {
-				responseCookies.push({
-					url: response.url(),
-					setCookie: headers["set-cookie"]
-				});
+			responseCookies.push({
+				url: response.url(),
+				setCookie: headers["set-cookie"]
+			});
 			}
+		} catch (err) {
+			// response may already be gone; ignore
+		}
 		});
-		console.log("Response Cookies:", responseCookies);
 		
 
 		//getting cookies in iframe
 		const frames = page.frames();
-		for (const frame of frames) {
-		console.log(frame.url());
-		}
+		
 
 		// open website
 		await page.goto(targetUrl, {
@@ -276,11 +347,20 @@ export default {
 			timeout: 45000
 		});
 
+		try {
+			await page.waitForLoadState("networkidle", { timeout: 15000 });
+		} catch (e) {
+			console.log("Network never went idle (expected on tracker-heavy sites) — continuing");
+		}
 
 		// wait for delayed cookies
 		await page.waitForTimeout(20000);
 
 
+		console.log("Response Cookies:", responseCookies.length);
+		for (const frame of frames) {
+			console.log(frame.url());
+		}
 		
 
 		//matchtracker function call
@@ -462,9 +542,57 @@ export default {
 			await page.waitForTimeout(10000);
 		}
 
-		// ---- read the FULL post-consent cookie set ----
-		const cookies = await context.cookies();
-		console.log("Post-consent cookie count:", cookies.length);
+		// ---- crawl a few internal pages to collect more cookies (CookieYes-style) ----
+		try {
+			const origin = new URL(targetUrl).origin;
+
+			// collect same-site links from the homepage
+			const links = await page.evaluate((origin) => {
+				return [...new Set(
+					[...document.querySelectorAll("a[href]")]
+						.map(a => a.href)
+						.filter(h => h.startsWith(origin))
+				)].slice(0, 4);   // cap at 4 pages to stay within Worker CPU/time limits
+			}, origin);
+
+			console.log("Crawling internal pages:", links.length);
+
+			for (const link of links) {
+				try {
+					await page.goto(link, { waitUntil: "domcontentloaded", timeout: 30000 });
+					await page.waitForTimeout(4000);   // let that page's tags fire
+				} catch (e) {
+					console.log("Skip page:", link, e.message);
+				}
+			}
+		} catch (e) {
+			console.log("Crawl failed:", e.message);
+		}
+
+		// jar cookies (what the browser actually stored — homepage + accepted + crawled pages)
+		const jarCookies = await context.cookies();
+		console.log("jar cookies",jarCookies.length);
+		
+		// dedupe by name + domain
+		const cookieMap = new Map();
+		const keyOf = c => `${c.name.toLowerCase()}|${(c.domain || "").replace(/^\./, "").toLowerCase()}`;
+
+		for (const c of jarCookies) {
+		cookieMap.set(keyOf(c), c);
+		}
+
+		// add Set-Cookie header cookies the browser may NOT have stored (blocked 3rd-party)
+		for (const rc of responseCookies) {
+		for (const p of parseSetCookie(rc.setCookie, rc.url)) {
+			const key = keyOf(p);
+			if (!cookieMap.has(key)) {
+			cookieMap.set(key, p);   // only add if not already in the jar
+			}
+		}
+		}
+
+		const cookies = [...cookieMap.values()];
+		console.log("Total merged cookies:", cookies.length);
 		
 
 		let counts ={necessary: 0, advertisement: 0,analytics: 0, functional: 0, other: 0};
