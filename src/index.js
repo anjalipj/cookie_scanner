@@ -53,7 +53,7 @@ export default {
 	
 	// ....Tracker funtion....
 	async function matchTrackers(domains, env) {
-		console.log("tracker function");
+		console.log("matchtracker function");
 		
 		if (!trackerCache) {
 			const trackerRows = await env.cookie_scanner_db
