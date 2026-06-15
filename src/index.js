@@ -137,7 +137,7 @@ export default {
 		if (!cmpCache) {
 			const cmpRows = await env.cookie_scanner_db
 				.prepare(`
-					SELECT display_name,vendor,script_domains
+					SELECT display_name,vendor,script_domains,accept_selectors
 					FROM cmps
 				`)
 				.all();
@@ -179,7 +179,8 @@ export default {
 
 			detectedCMPs.push({
 				name: displayName,
-				vendor: vendor
+				vendor: vendor,
+				acceptSelector: cmp.accept_selectors
 			});
 
 			}
@@ -212,50 +213,51 @@ export default {
 				sameSite: "Lax"
 			};
 
-	    for (let i = 1; i < parts.length; i++) {
-	      const [k, v] = parts[i].split("=");
-	      const key = (k || "").toLowerCase().trim();
-	      const val = (v || "").trim();
+			for (let i = 1; i < parts.length; i++) {
+				const [k, v] = parts[i].split("=");
+				const key = (k || "").toLowerCase().trim();
+				const val = (v || "").trim();
 
-	      switch (key) {
-	        case "domain":
-	          cookie.domain = val.replace(/^\./, "");
-	          break;
-	        case "path":
-	          cookie.path = val;
-	          break;
-	        case "expires":
-	          // convert to unix seconds to match context.cookies() format
-	          try {
-	            const t = Date.parse(val);
-	            if (!isNaN(t)) cookie.expires = Math.floor(t / 1000);
-	          } catch {}
-	          break;
-	        case "max-age":
-	          // max-age is relative seconds; we can't compute absolute without "now",
-	          // so just store it so you know it's persistent
-	          cookie.maxAge = parseInt(val, 10);
-	          break;
-	        case "httponly":
-	          cookie.httpOnly = true;
-	          break;
-	        case "secure":
-	          cookie.secure = true;
-	          break;
-	        case "samesite":
-	          cookie.sameSite = val || "Lax";
-	          break;
-	      }
-	    }
+				switch (key) {
+					case "domain":
+					cookie.domain = val.replace(/^\./, "");
+					break;
 
-	    if (!cookie.domain && responseUrl) {
-	      try { cookie.domain = new URL(responseUrl).hostname.replace(/^www\./, ""); } catch {}
-	    }
+					case "path":
+					cookie.path = val;
+					break;
 
-	    results.push(cookie);
-	  }
+					case "expires":
+					// convert to unix seconds to match context.cookies() format
+					try {
+						const t = Date.parse(val);
+						if (!isNaN(t)) cookie.expires = Math.floor(t / 1000);
+					} catch {}
+					break;
+					case "max-age":
+					// max-age is relative seconds; we can't compute absolute without "now",
+					// so just store it so you know it's persistent
+					cookie.maxAge = parseInt(val, 10);
+					break;
+					case "httponly":
+					cookie.httpOnly = true;
+					break;
+					case "secure":
+					cookie.secure = true;
+					break;
+					case "samesite":
+					cookie.sameSite = val || "Lax";
+					break;
+				}
+			}
 
-	  return results;
+			if (!cookie.domain && responseUrl) {
+				try { cookie.domain = new URL(responseUrl).hostname.replace(/^www\./, ""); } catch {}
+			}
+			results.push(cookie);
+
+		}
+		return results;
 	}
 
 
@@ -308,6 +310,7 @@ export default {
 		let networkRequests = new Set();
 		let requestDomains = new Set();
 
+
 		// Listen for requests
 		page.on("request", request => {
 			networkRequests.add(request.url());
@@ -346,17 +349,20 @@ export default {
 			timeout: 45000
 		});
 
-		try {
-			await page.waitForLoadState("networkidle", { timeout: 15000 });
-		} catch (e) {
-			console.log("Network never went idle (expected on tracker-heavy sites) — continuing");
-		}
+		//network idle also adding 
+		// try {
+		// 	await page.waitForLoadState("networkidle", { timeout: 15000 });
+		// } catch (e) {
+		// 	console.log("Network never went idle (expected on tracker-heavy sites) — continuing");
+		// }
 
 		// wait for delayed cookies
-		await page.waitForTimeout(20000);
+		await page.waitForTimeout(3000);
 
 
+		//headers and iframes output
 		console.log("Response Cookies:", responseCookies.length);
+
 		for (const frame of frames) {
 			console.log(frame.url());
 		}
@@ -480,7 +486,95 @@ export default {
 
 		// });
 		// const cookies =[...cookieMap.values()];
-		// jar cookies (what the browser actually stored)
+
+		// ---- capture PRE-consent cookies (before clicking Accept) ----
+		const preConsentCookies = await context.cookies();
+		console.log("Pre-consent cookie count:", preConsentCookies.length);
+
+		// ---- click the consent "Accept" button to unlock tracking cookies ----
+		let consentClicked = false;
+
+		// 1) try the detected CMP's own accept selector (from cmps table)
+		for (const cmp of CMPs) {
+			if (cmp.acceptSelector) {
+				try {
+					const btn = await page.$(cmp.acceptSelector);
+					if (btn) {
+						await btn.click();
+						consentClicked = true;
+						console.log("Accepted via CMP selector:", cmp.acceptSelector);
+						break;
+					}
+				} catch (e) {
+					console.log("CMP selector click failed:", e.message);
+				}
+			}
+		}
+
+		// 2) fall back to a broad generic accept button
+		if (!consentClicked) {
+			try {
+				const acceptBtn = await page.$(`
+					button:has-text("Accept all"),
+					button:has-text("Accept All"),
+					button:has-text("Accept"),
+					button:has-text("Allow all"),
+					button:has-text("Allow"),
+					button:has-text("I agree"),
+					button:has-text("Agree"),
+					button:has-text("Got it"),
+					button:has-text("OK"),
+					a:has-text("Accept all"),
+					a:has-text("Accept"),
+					[id*="accept" i],
+					[class*="accept" i],
+					[aria-label*="accept" i]
+				`);
+				if (acceptBtn) {
+					await acceptBtn.click();
+					consentClicked = true;
+					console.log("Accepted via generic selector");
+				} else {
+					console.log("No accept button found");
+				}
+			} catch (e) {
+				console.log("Generic accept click failed:", e.message);
+			}
+		}
+
+		// ---- wait for unlocked tracking scripts to set their cookies ----
+		if (consentClicked) {
+			await page.waitForTimeout(5000);
+		}
+
+		// ---- crawl a few internal pages to collect more cookies (CookieYes-style) ----
+		try {
+			const origin = new URL(targetUrl).origin;
+
+			// collect same-site links from the homepage
+			const links = await page.evaluate((origin) => {
+				return [...new Set(
+					[...document.querySelectorAll("a[href]")]
+						.map(a => a.href)
+						.filter(h => h.startsWith(origin))
+				)].slice(0, 2);   // cap at 4 pages to stay within Worker CPU/time limits
+			}, origin);
+
+			console.log("Crawling internal pages:", links.length);
+
+			for (const link of links) {
+				try {
+					await page.goto(link, { waitUntil: "domcontentloaded", timeout: 30000 });
+					await page.waitForTimeout(2000);   // let that page's tags fire
+				} catch (e) {
+					console.log("Skip page:", link, e.message);
+				}
+			}
+		} catch (e) {
+			console.log("Crawl failed:", e.message);
+		}
+
+		// jar cookies (what the browser actually stored — homepage + accepted + crawled pages)
 		const jarCookies = await context.cookies();
 		console.log("jar cookies",jarCookies.length);
 		
