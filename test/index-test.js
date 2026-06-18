@@ -290,6 +290,10 @@ export default {
 	let browser;
     try {
 
+		// instant ping — if the frontend lights up immediately, streaming works;
+		// if it only appears at the end, the response is being buffered (see notes).
+		await send("starting", { message: "Starting scan…", progress: 5 });
+
 		const trackerCount = await env.cookie_scanner_db.prepare("SELECT COUNT(*) as total FROM trackers").first();
 		console.log("Trackers rows:", trackerCount);
 
@@ -308,8 +312,10 @@ export default {
 		const body = await request.json();
 
 		const targetUrl = body.url;
+		console.log(">>> got body, scanning:", targetUrl);
 
 		await send("resolving", { message: "Resolving domain & TLS certificates", progress: 10 });
+		console.log(">>> launching browser...");
 
 		// Launch browser
 		browser = await launch(env.MYBROWSER, {
@@ -333,6 +339,7 @@ export default {
 		});
 
 		const page = await context.newPage();
+		console.log(">>> browser launched & page ready");
 
 		let networkRequests = new Set();
 		let requestDomains = new Set();
