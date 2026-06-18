@@ -1,0 +1,124 @@
+<script>
+  //hiding the crawling_card
+  //document.getElementById('crawling_section').style.display = 'none';
+
+  document.getElementById('check_btn').onclick = async function () {
+
+    try {
+      const url = document.getElementById("website_url").value.trim();
+      const errorMsg = document.getElementById('url_error');
+      // Hide previous error
+      errorMsg.style.display = 'none';
+
+      // Empty input
+      if (!url) {
+        errorMsg.style.display = 'block';
+        return;
+      }
+
+      // URL validation
+      try {
+        new URL(url);
+      } catch {
+        errorMsg.style.display = 'block';
+        return;
+      }
+
+      // Hide input section
+      document.getElementById('input_section').style.display = 'none';
+
+      // Show crawling card
+      document.getElementById("crawling_section").style.display = "block";
+
+      // Show domain name on card
+      document.getElementById('domain_name').textContent = new URL(url).hostname;
+
+      // Start scan (the worker streams progress as Server-Sent Events)
+      const response = await fetch('http://127.0.0.1:8787', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          url: url,
+        }),
+      });
+
+      if (!response.ok || !response.body) {
+        throw new Error('Scan request failed: ' + response.status);
+      }
+
+      // ---- read the SSE stream ----
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let finalResult = null;
+
+      // called once per progress event coming from the worker
+      function onProgress(msg) {
+        console.log(msg.step, (msg.progress ?? '') + '%', msg.message || '');
+
+        // update a status line if present
+        const statusEl = document.getElementById('scan_status');
+        if (statusEl && msg.message) statusEl.textContent = msg.message;
+
+        // update a progress bar if present
+        const barEl = document.getElementById('scan_progress');
+        if (barEl && typeof msg.progress === 'number') {
+          barEl.style.width = msg.progress + '%';
+        }
+
+        // mark the matching step item active if you have an element
+        // with an id like step_resolving, step_loading, step_capturing, etc.
+        const stepEl = document.getElementById('step_' + msg.step);
+        if (stepEl) stepEl.classList.add('active');
+      }
+
+      // keep reading until the worker closes the stream
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        // SSE messages are separated by a blank line
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop();   // last piece may be incomplete — keep it
+
+        for (const part of parts) {
+          const line = part.replace(/^data: /, '').trim();
+          if (!line) continue;
+
+          const msg = JSON.parse(line);
+          onProgress(msg);
+
+          if (msg.step === 'error') {
+            throw new Error(msg.message || 'Scan failed');
+          }
+          if (msg.step === 'done') {
+            finalResult = msg.result;
+          }
+        }
+      }
+
+      if (!finalResult) {
+        throw new Error('Scan ended without a result');
+      }
+
+      console.log(finalResult);
+
+      // Save result for audit page
+      localStorage.setItem('scan_result', JSON.stringify(finalResult));
+
+      // Redirect to report page
+      //window.location.href = "/audit-report";
+    } catch (error) {
+      console.error(error);
+      const errorMsg = document.getElementById('url_error');
+      if (errorMsg) {
+        errorMsg.textContent = error.message;
+        errorMsg.style.display = 'block';
+      }
+    }
+  };
+</script>
