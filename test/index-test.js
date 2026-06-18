@@ -262,6 +262,12 @@ export default {
 
 
 
+	// Read the request body NOW, while the handler is still active.
+	// Once we return the streaming Response below, the request body is no
+	// longer readable — calling request.json() inside ctx.waitUntil would hang.
+	const body = await request.json();
+	const targetUrl = body.url;
+
 	// ---------- SSE streaming setup ----------
 	// A TransformStream is a pipe: we write progress into `writable`,
 	// the HTTP response streams it out of `readable` to the frontend.
@@ -308,11 +314,7 @@ export default {
 		// await getCmpData(env);
 
 
-		// Get body
-		const body = await request.json();
-
-		const targetUrl = body.url;
-		console.log(">>> got body, scanning:", targetUrl);
+		console.log(">>> scanning:", targetUrl);
 
 		await send("resolving", { message: "Resolving domain & TLS certificates", progress: 10 });
 		console.log(">>> launching browser...");
