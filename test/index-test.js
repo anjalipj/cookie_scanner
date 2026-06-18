@@ -213,50 +213,51 @@ export default {
 				sameSite: "Lax"
 			};
 
-	    for (let i = 1; i < parts.length; i++) {
-	      const [k, v] = parts[i].split("=");
-	      const key = (k || "").toLowerCase().trim();
-	      const val = (v || "").trim();
+			for (let i = 1; i < parts.length; i++) {
+				const [k, v] = parts[i].split("=");
+				const key = (k || "").toLowerCase().trim();
+				const val = (v || "").trim();
 
-	      switch (key) {
-	        case "domain":
-	          cookie.domain = val.replace(/^\./, "");
-	          break;
-	        case "path":
-	          cookie.path = val;
-	          break;
-	        case "expires":
-	          // convert to unix seconds to match context.cookies() format
-	          try {
-	            const t = Date.parse(val);
-	            if (!isNaN(t)) cookie.expires = Math.floor(t / 1000);
-	          } catch {}
-	          break;
-	        case "max-age":
-	          // max-age is relative seconds; we can't compute absolute without "now",
-	          // so just store it so you know it's persistent
-	          cookie.maxAge = parseInt(val, 10);
-	          break;
-	        case "httponly":
-	          cookie.httpOnly = true;
-	          break;
-	        case "secure":
-	          cookie.secure = true;
-	          break;
-	        case "samesite":
-	          cookie.sameSite = val || "Lax";
-	          break;
-	      }
-	    }
+				switch (key) {
+					case "domain":
+					cookie.domain = val.replace(/^\./, "");
+					break;
 
-	    if (!cookie.domain && responseUrl) {
-	      try { cookie.domain = new URL(responseUrl).hostname.replace(/^www\./, ""); } catch {}
-	    }
+					case "path":
+					cookie.path = val;
+					break;
 
-	    results.push(cookie);
-	  }
+					case "expires":
+					// convert to unix seconds to match context.cookies() format
+					try {
+						const t = Date.parse(val);
+						if (!isNaN(t)) cookie.expires = Math.floor(t / 1000);
+					} catch {}
+					break;
+					case "max-age":
+					// max-age is relative seconds; we can't compute absolute without "now",
+					// so just store it so you know it's persistent
+					cookie.maxAge = parseInt(val, 10);
+					break;
+					case "httponly":
+					cookie.httpOnly = true;
+					break;
+					case "secure":
+					cookie.secure = true;
+					break;
+					case "samesite":
+					cookie.sameSite = val || "Lax";
+					break;
+				}
+			}
 
-	  return results;
+			if (!cookie.domain && responseUrl) {
+				try { cookie.domain = new URL(responseUrl).hostname.replace(/^www\./, ""); } catch {}
+			}
+			results.push(cookie);
+
+		}
+		return results;
 	}
 
 
@@ -283,11 +284,6 @@ export default {
 
 		const targetUrl = body.url;
 
-		// scan deadline — hard cap the whole scan at 60s
-		const scanStart = Date.now();
-		const SCAN_DEADLINE_MS = 60000;
-		const timeLeft = () => SCAN_DEADLINE_MS - (Date.now() - scanStart);
-
 		// Launch browser
 		browser = await launch(env.MYBROWSER, {
 			args: [
@@ -313,6 +309,7 @@ export default {
 
 		let networkRequests = new Set();
 		let requestDomains = new Set();
+
 
 		// Listen for requests
 		page.on("request", request => {
@@ -352,17 +349,20 @@ export default {
 			timeout: 45000
 		});
 
-		try {
-			await page.waitForLoadState("networkidle", { timeout: 15000 });
-		} catch (e) {
-			console.log("Network never went idle (expected on tracker-heavy sites) — continuing");
-		}
+		//network idle also adding 
+		// try {
+		// 	await page.waitForLoadState("networkidle", { timeout: 15000 });
+		// } catch (e) {
+		// 	console.log("Network never went idle (expected on tracker-heavy sites) — continuing");
+		// }
 
 		// wait for delayed cookies
-		await page.waitForTimeout(20000);
+		await page.waitForTimeout(3000);
 
 
+		//headers and iframes output
 		console.log("Response Cookies:", responseCookies.length);
+
 		for (const frame of frames) {
 			console.log(frame.url());
 		}
@@ -511,21 +511,7 @@ export default {
 			}
 		}
 
-		// 2) try known ConsentBit selectors (clean CSS — most reliable)
-		if (!consentClicked) {
-			try {
-				const cbBtn = await page.$("#accept-btn, .cb-cookie-accept-btn");
-				if (cbBtn) {
-					await cbBtn.click();
-					consentClicked = true;
-					console.log("Accepted via ConsentBit selector");
-				}
-			} catch (e) {
-				console.log("ConsentBit selector click failed:", e.message);
-			}
-		}
-
-		// 3) fall back to a broad generic accept button
+		// 2) fall back to a broad generic accept button
 		if (!consentClicked) {
 			try {
 				const acceptBtn = await page.$(`
@@ -540,9 +526,9 @@ export default {
 					button:has-text("OK"),
 					a:has-text("Accept all"),
 					a:has-text("Accept"),
-					[id*="accept"],
-					[class*="accept"],
-					[aria-label*="accept"]
+					[id*="accept" i],
+					[class*="accept" i],
+					[aria-label*="accept" i]
 				`);
 				if (acceptBtn) {
 					await acceptBtn.click();
@@ -565,33 +551,21 @@ export default {
 		try {
 			const origin = new URL(targetUrl).origin;
 
-			// collect same-site links from the homepage (distinct paths, no #/mailto/tel)
+			// collect same-site links from the homepage
 			const links = await page.evaluate((origin) => {
-				const seen = new Set();
-				const out = [];
-				for (const a of document.querySelectorAll("a[href]")) {
-					const h = a.href;
-					if (!h.startsWith(origin)) continue;
-					if (h.includes("#") || h.startsWith("mailto:") || h.startsWith("tel:")) continue;
-					const path = new URL(h).pathname;
-					if (path === "/" || seen.has(path)) continue;
-					seen.add(path);
-					out.push(h);
-				}
-				return out.slice(0, 2);   // cap at 2 pages to stay under 60s
+				return [...new Set(
+					[...document.querySelectorAll("a[href]")]
+						.map(a => a.href)
+						.filter(h => h.startsWith(origin))
+				)].slice(0, 2);   // cap at 4 pages to stay within Worker CPU/time limits
 			}, origin);
 
 			console.log("Crawling internal pages:", links.length);
 
 			for (const link of links) {
-				// stop crawling if we're running low on the 60s budget
-				if (timeLeft() < 10000) {
-					console.log("Skipping remaining crawl — near 60s deadline");
-					break;
-				}
 				try {
-					await page.goto(link, { waitUntil: "domcontentloaded", timeout: 8000 });
-					await page.waitForTimeout(1500);   // let that page's tags fire
+					await page.goto(link, { waitUntil: "domcontentloaded", timeout: 30000 });
+					await page.waitForTimeout(2000);   // let that page's tags fire
 				} catch (e) {
 					console.log("Skip page:", link, e.message);
 				}
