@@ -125,7 +125,8 @@ export default {
 		return {
 			totalDetectedTrackers: detected.length,
 			totalUndetectedTrackers: undetected.length,
-			uniqueTrackers: [...uniqueTrackersMap.values()]
+			uniqueTrackers: [...uniqueTrackersMap.values()],
+			unknownVendors: undetected            // unmapped domains (name = domain)
 		};
 	}
 
@@ -406,7 +407,7 @@ export default {
 		}
 		
 
-		await send("matching", { message: "Matching against 100,000+ cookie database", progress: 50 });
+		await send("capturing", { message: "Capturing HTTP, JavaScript and local-storage cookies", progress: 50 });
 
 		//matchtracker function call
 		const trackerResult = await matchTrackers([...requestDomains],env);
@@ -527,7 +528,7 @@ export default {
 		// });
 		// const cookies =[...cookieMap.values()];
 
-		await send("capturing", { message: "Capturing HTTP, JavaScript and local-storage cookies", progress: 70 });
+		await send("matching", { message: "Matching against 100,000+ cookie database", progress: 70 });
 
 		// ---- capture PRE-consent cookies (before clicking Accept) ----
 		const preConsentCookies = await context.cookies();
@@ -648,6 +649,7 @@ export default {
 							.prepare(`
 								SELECT
 								name_or_pattern,
+								provider,
 								category,
 								is_pattern,
 								purpose,
@@ -707,6 +709,7 @@ export default {
 				//adding description,duration, category to cookie obj
 				// cookie.description = dbCookie.purpose || "No description available";
 				cookie.duration = dbCookie.retention || "-";
+				cookie.provider = dbCookie.provider  || "-";
 				
 				const category = dbCookie.category.toLowerCase();
 				cookie.category= category
@@ -735,6 +738,7 @@ export default {
 				cookie.category='other'
 				// cookie.description = "No description available";
 				cookie.duration = "-";
+				cookie.provider = "-"
 				counts.other++
 			}
 		}
@@ -747,12 +751,16 @@ export default {
 		await send("done", {
 			progress: 100,
 			result: {
+				scannedUrl: targetUrl,
+    			scannedDomain: new URL(targetUrl).hostname.replace(/^www\./, ''),
 				totalCookies: cookies.length,
 				counts,
 				cookies,
 				domains: [...requestDomains],
 				totalDomains: requestDomains.size,
 				trackers: trackerResult.uniqueTrackers,
+				unknownVendors: trackerResult.unknownVendors,          // unmapped domains
+				totalUnknown: trackerResult.totalUndetectedTrackers,   // count for "10 unknowns"
 				domSignal: domSignals,
 				grade: grade
 			}
