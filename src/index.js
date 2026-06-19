@@ -15,7 +15,7 @@ const corsHeaders = {
 
 export default {
 
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
 
 
     // Handle CORS
@@ -262,8 +262,43 @@ export default {
 
 
 
+	// Read the request body NOW, while the handler is still active.
+	// Once we return the streaming Response below, the request body is no
+	// longer readable — calling request.json() inside ctx.waitUntil would hang.
+	const body = await request.json();
+	const targetUrl = body.url;
+
+	// ---------- SSE streaming setup ----------
+	// A TransformStream is a pipe: we write progress into `writable`,
+	// the HTTP response streams it out of `readable` to the frontend.
+	const { readable, writable } = new TransformStream();
+	const writer = writable.getWriter();
+	const encoder = new TextEncoder();
+
+	// send one SSE message: `data: {...}\n\n`
+	const send = (step, payload = {}) =>
+		writer.write(encoder.encode(`data: ${JSON.stringify({ step, ...payload })}\n\n`));
+
+	const sseHeaders = {
+		...corsHeaders,
+		"Content-Type": "text/event-stream",
+		"Cache-Control": "no-cache",
+	};
+
+	// Run the whole scan in the background, streaming progress as each step finishes.
+	// ctx.waitUntil keeps the worker alive while the stream is still open.
+	ctx.waitUntil(runScan());
+
+	// Return the OPEN stream immediately — do NOT await runScan().
+	return new Response(readable, { headers: sseHeaders });
+
+	async function runScan() {
 	let browser;
     try {
+
+		// instant ping — if the frontend lights up immediately, streaming works;
+		// if it only appears at the end, the response is being buffered (see notes).
+		await send("starting", { message: "Starting scan…", progress: 5 });
 
 		const trackerCount = await env.cookie_scanner_db.prepare("SELECT COUNT(*) as total FROM trackers").first();
 		console.log("Trackers rows:", trackerCount);
@@ -279,10 +314,10 @@ export default {
 		// await getCmpData(env);
 
 
-		// Get body
-		const body = await request.json();
+		console.log(">>> scanning:", targetUrl);
 
-		const targetUrl = body.url;
+		await send("resolving", { message: "Resolving domain & TLS certificates", progress: 10 });
+		console.log(">>> launching browser...");
 
 		// Launch browser
 		browser = await launch(env.MYBROWSER, {
@@ -306,6 +341,7 @@ export default {
 		});
 
 		const page = await context.newPage();
+		console.log(">>> browser launched & page ready");
 
 		let networkRequests = new Set();
 		let requestDomains = new Set();
@@ -343,6 +379,8 @@ export default {
 		const frames = page.frames();
 		
 
+		await send("loading", { message: "Loading home page and embedded scripts", progress: 25 });
+
 		// open website
 		await page.goto(targetUrl, {
 			waitUntil: "domcontentloaded",
@@ -367,6 +405,8 @@ export default {
 			console.log(frame.url());
 		}
 		
+
+		await send("capturing", { message: "Capturing HTTP, JavaScript and local-storage cookies", progress: 50 });
 
 		//matchtracker function call
 		const trackerResult = await matchTrackers([...requestDomains],env);
@@ -487,6 +527,8 @@ export default {
 		// });
 		// const cookies =[...cookieMap.values()];
 
+		await send("matching", { message: "Matching against 100,000+ cookie database", progress: 70 });
+
 		// ---- capture PRE-consent cookies (before clicking Accept) ----
 		const preConsentCookies = await context.cookies();
 		console.log("Pre-consent cookie count:", preConsentCookies.length);
@@ -606,6 +648,7 @@ export default {
 							.prepare(`
 								SELECT
 								name_or_pattern,
+								provider,
 								category,
 								is_pattern,
 								purpose,
@@ -640,6 +683,8 @@ export default {
 			}
 		}
 
+		await send("categorizing", { message: "Categorizing cookies and detecting third parties", progress: 85 });
+
 		//categorizing the cookies
 		for (const cookie of cookies){
 
@@ -663,6 +708,7 @@ export default {
 				//adding description,duration, category to cookie obj
 				// cookie.description = dbCookie.purpose || "No description available";
 				cookie.duration = dbCookie.retention || "-";
+				cookie.provider = dbCookie.provider  || "-";
 				
 				const category = dbCookie.category.toLowerCase();
 				cookie.category= category
@@ -691,40 +737,36 @@ export default {
 				cookie.category='other'
 				// cookie.description = "No description available";
 				cookie.duration = "-";
+				cookie.provider = "-"
 				counts.other++
 			}
 		}
 		console.log(counts)
 		
 
-		return Response.json(
-			{
-			totalCookies: cookies.length,
-			counts,
-			cookies,
-			domains: [...requestDomains],
-			totalDomains: requestDomains.size,
-			trackers: trackerResult.uniqueTrackers,
-			domSignal: domSignals,
-      		grade:grade
-			},
-			{
-				headers: corsHeaders
-			}
-		);
+		await send("report", { message: "Compiling your audit report", progress: 95 });
 
-    } 
-	
+		// final result — the same object you returned before, now as the "done" event
+		await send("done", {
+			progress: 100,
+			result: {
+				scannedUrl: targetUrl,
+    			scannedDomain: new URL(targetUrl).hostname.replace(/^www\./, ''),
+				totalCookies: cookies.length,
+				counts,
+				cookies,
+				domains: [...requestDomains],
+				totalDomains: requestDomains.size,
+				trackers: trackerResult.uniqueTrackers,
+				domSignal: domSignals,
+				grade: grade
+			}
+		});
+
+    }
+
 	catch(error) {
-      return Response.json(
-        {
-          error: error.message
-        },
-        {
-		  status: 500,
-		  headers: corsHeaders
-		}
-      );
+		await send("error", { message: error.message });
     }
 
 	finally {
@@ -735,6 +777,9 @@ export default {
 				console.log("Browser close error:", e);
 			}
 		}
+		// close the stream so the frontend's reader ends cleanly
+		await writer.close();
+	}
 	}
 
   }
