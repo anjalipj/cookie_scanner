@@ -55,29 +55,62 @@
       let finalResult = null;
 
       // called once per progress event coming from the worker
+      // human-readable label for each step the worker can send
+      const STEP_LABELS = {
+        resolving:    'Resolving domain & TLS certificates',
+        loading:      'Loading home page and embedded scripts',
+        capturing:    'Capturing HTTP, JavaScript and local-storage cookies',
+        matching:     'Matching against 100,000+ cookie database',
+        categorizing: 'Categorizing cookies and detecting third parties',
+        report:       'Compiling your audit report',
+        done:         'Scan complete',
+        error:        'Scan failed',
+      };
+
+      // remember the previous step so we can mark it "completed"
+      let prevStep = null;
+      let prevStepEl = null;
+
       function onProgress(msg) {
-        console.log(msg.step, (msg.progress ?? '') + '%', msg.message || '');
+        const label = STEP_LABELS[msg.step] || msg.message || msg.step;
 
-        // update a status line if present
+        // ---- 1. console each step ----
+        // the previous step is finished once the next event arrives
+        if (prevStep && prevStep !== msg.step) {
+          console.log('✅ completed:', STEP_LABELS[prevStep] || prevStep);
+        }
+        console.log('⏳ ' + (msg.progress ?? '') + '% →', label);
+        prevStep = msg.step;
+
+        // ---- 2. set the status text in the UI ----
         const statusEl = document.getElementById('scan_status');
-        if (statusEl && msg.message) statusEl.textContent = msg.message;
+        if (statusEl) statusEl.textContent = label;
 
-        // update a progress bar if present
+        // ---- 3. move the progress bar ----
         const barEl = document.getElementById('scan_progress');
         if (barEl && typeof msg.progress === 'number') {
           barEl.style.width = msg.progress + '%';
         }
 
-        // mark the matching step item active if you have an element
-        // with an id like step_resolving, step_loading, step_capturing, etc.
+        // ---- 4. (optional) mark each step row in a checklist ----
+        // mark the step that just started as "active"
         const stepEl = document.getElementById('step_' + msg.step);
-        if (stepEl) stepEl.classList.add('active');
+        if (stepEl) {
+          stepEl.classList.add('active');
+        }
+        // and mark the previous step row as "done"
+        if (prevStepEl) {
+          prevStepEl.classList.remove('active');
+          prevStepEl.classList.add('completed');
+        }
+        prevStepEl = stepEl;
       }
 
-      // keep reading until the worker closes the stream
-      while (true) {
+      // keep reading until we get the result (or the worker closes the stream)
+      let finished = false;
+      while (!finished) {
         const { value, done } = await reader.read();
-        if (done) break;
+        if (done) break;   // stream closed by the worker
 
         buffer += decoder.decode(value, { stream: true });
 
@@ -97,9 +130,12 @@
           }
           if (msg.step === 'done') {
             finalResult = msg.result;
+            finished = true;   // got everything — stop reading
+            break;
           }
         }
       }
+      try { await reader.cancel(); } catch {}   // release the stream
 
       if (!finalResult) {
         throw new Error('Scan ended without a result');
