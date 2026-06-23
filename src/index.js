@@ -125,7 +125,8 @@ export default {
 		return {
 			totalDetectedTrackers: detected.length,
 			totalUndetectedTrackers: undetected.length,
-			uniqueTrackers: [...uniqueTrackersMap.values()]
+			uniqueTrackers: [...uniqueTrackersMap.values()],
+			unknownVendors: undetected            // unmapped domains (name = domain)
 		};
 	}
 
@@ -758,6 +759,8 @@ export default {
 				domains: [...requestDomains],
 				totalDomains: requestDomains.size,
 				trackers: trackerResult.uniqueTrackers,
+				unknownVendors: trackerResult.unknownVendors,          // unmapped domains
+				totalUnknown: trackerResult.totalUndetectedTrackers,   // count for "10 unknowns"
 				domSignal: domSignals,
 				grade: grade
 			}
