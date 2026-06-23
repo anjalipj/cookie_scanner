@@ -413,6 +413,37 @@ export default {
 		const trackerResult = await matchTrackers([...requestDomains],env);
 		console.log(trackerResult)
 
+		//tracker ctegory count
+		const trackerCounts = {
+			analytics: 0,
+			advertising: 0,
+			necessary: 0,
+			functional: 0,
+			other: 0
+			};
+		trackerResult.uniqueTrackers.forEach(tracker => {
+		const category = (tracker.category || "").toLowerCase();
+
+		if (category.includes("analytics")) {
+			trackerCounts.analytics++;
+		}
+		else if (
+			category.includes("advertising") ||
+			category.includes("marketing")
+		) {
+			trackerCounts.advertising++;
+		}
+		else if (category.includes("necessary")) {
+			trackerCounts.necessary++;
+		}
+		else if (category.includes("functional")) {
+			trackerCounts.functional++;
+		}
+		else {
+			trackerCounts.other++;
+		}
+		});
+		console.log("Tracker Counts:", trackerCounts);
 
 
 		//detectCMP function call
@@ -755,6 +786,7 @@ export default {
     			scannedDomain: new URL(targetUrl).hostname.replace(/^www\./, ''),
 				totalCookies: cookies.length,
 				counts,
+				trackerCounts,
 				cookies,
 				domains: [...requestDomains],
 				totalDomains: requestDomains.size,
