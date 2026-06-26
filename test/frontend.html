@@ -6,6 +6,13 @@
   const result = JSON.parse(sessionStorage.getItem("scan_result") || "null");
   if (!result || !result.trackers) { console.error("❌ No scan_result found"); return; }
 
+  // Build the webapp auth URL, carrying the scan's report id so the signup/login
+  // flow can email the PDF report. Works cross-domain via ?scanId=.
+  const WEBAPP_BASE = "https://consentbit-webapp-frontend-test.pages.dev";
+  const cbReportId = result.reportId || sessionStorage.getItem("cb_report_id") || "";
+  const cbAuthUrl = (path) =>
+    WEBAPP_BASE + path + (cbReportId ? "?scanId=" + encodeURIComponent(cbReportId) : "");
+
   /* ---------- derive ---------- */
   const TRACKING = ["analytics", "marketing", "advertis", "behavioral"];
   const s = result.domSignal || {};
@@ -267,7 +274,7 @@
   if(blurMeta) blurMeta.textContent = `Sign up free to access all ${detected} vendors — configuration status, categories, and step-by-step fixes for every one.`
 
   document.getElementById("blurPart_signUp").addEventListener("click", () => {
-        window.open("https://accounts.consentbit.com/signup","_blank","noopener,noreferrer");
+        window.open(cbAuthUrl("/signup"),"_blank","noopener,noreferrer");
   });
 
   const blurContainer = document.getElementById("blurGate_cards"); 
@@ -320,7 +327,7 @@
 
   //readyToFix
   document.getElementById("readyToFix_btn").addEventListener("click", () => {
-       window.open("https://accounts.consentbit.com/login", "_blank","noopener,noreferrer")
+       window.open(cbAuthUrl("/login"), "_blank","noopener,noreferrer")
   });
 
 
