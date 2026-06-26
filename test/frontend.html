@@ -1,160 +1,414 @@
+
 <script>
-  //hiding the crawling_card
-  //document.getElementById('crawling_section').style.display = 'none';
+  
+(function consoleAllMappings() {
 
-  document.getElementById('check_btn').onclick = async function () {
+  const result = JSON.parse(sessionStorage.getItem("scan_result") || "null");
+  if (!result || !result.trackers) { console.error("❌ No scan_result found"); return; }
 
-    try {
-      const url = document.getElementById("website_url").value.trim();
-      const errorMsg = document.getElementById('url_error');
-      // Hide previous error
-      errorMsg.style.display = 'none';
+  /* ---------- derive ---------- */
+  const TRACKING = ["analytics", "marketing", "advertis", "behavioral"];
+  const s = result.domSignal || {};
+  const gated = !!(s.cookieBanner && s.rejectButton);
+  const c = result.counts || {};
 
-      // Empty input
-      if (!url) {
-        errorMsg.style.display = 'block';
-        return;
-      }
+  const vendors = result.trackers.map(v => {
+    const isTracking = TRACKING.some(x => (v.category||"").toLowerCase().includes(x));
+    return { name:v.name, category:v.category||"Other", owner:v.owner||"Unknown",
+             consentRequired:isTracking, badge:isTracking?"Consent required":"OK",
+             wellConfigured:!(isTracking && !gated) };
+  });
 
-      // URL validation
-      try {
-        new URL(url);
-      } catch {
-        errorMsg.style.display = 'block';
-        return;
-      }
+  const identified     = vendors.length;
+  const wellConfigured = vendors.filter(v=>v.wellConfigured).length;
+  const needAttention  = identified - wellConfigured;
+  const unknown        = result.totalUnknown || 0;
+  const detected       = identified + unknown;
+  const wcPct          = identified ? Math.round(wellConfigured/identified*100) : 0;
+  const beforeConsent  = gated ? 0 : (needAttention + unknown);
+  const barTotal       = wellConfigured + needAttention + unknown;
+  const greenPct       = barTotal ? Math.round(wellConfigured/barTotal*100) : 0;
+  const byCategory     = vendors.reduce((a,v)=>{a[v.category]=(a[v.category]||0)+1;return a;},{});
 
-      // Hide input section
-      document.getElementById('input_section').style.display = 'none';
+  let score = 0;
+  if (s.cmp?.length)  score += 20;
+  if (s.cookieBanner) score += 20;
+  if (s.rejectButton) score += 20;
+  if (s.privacyLink)  score += 20;
+  if (!result.trackers.some(t=>TRACKING.some(x=>(t.category||"").toLowerCase().includes(x)))) score += 20;
 
-      // Show crawling card
-      document.getElementById("crawling_section").style.display = "block";
+  const log = (id, val) => console.log(`%c${id}%c → ${val}`, "color:#2563eb;font-weight:bold", "color:#0f172a");
 
-      // Show domain name on card
-      document.getElementById('domain_name').textContent = new URL(url).hostname;
+  /* ---------- HEADER ---------- */
+  // console.group("%c📋 HEADER","font-weight:bold;color:#111");
+  // log("domain_top", result.scannedDomain);
+  // log("domain_bottom", result.scannedDomain);
+  // log("report_date", new Date().toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric"}));
+  // log("grade", result.grade);
+  // log("score", score + "%");
+  // console.groupEnd();
 
-      // Start scan (the worker streams progress as Server-Sent Events)
-      const response = await fetch('http://127.0.0.1:8787', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          url: url,
-        }),
+  /* ---------- BANNER / CMP ---------- */
+  // console.group("%c🍪 BANNER / CMP","font-weight:bold;color:#111");
+  // log("cookieBanner_status", s.cookieBanner ? "Found" : "Not found");
+  // log("cmp_status", (s.cmp&&s.cmp.length) ? `Detected CMP: ${s.cmp.map(x=>x.name).join(", ")}` : "No CMP found");
+  // console.log("   (gated:", gated, ")");
+  // console.groupEnd();
+
+  /* ---------- VENDOR STATS ---------- */
+  // console.group("%c🏢 VENDOR STATS","font-weight:bold;color:#111");
+  // log("detected_count", detected);
+  // log("identified_count", identified);
+  // log("unknown_count", unknown);
+  // console.groupEnd();
+
+  /* ---------- WELL-CONFIGURED ---------- */
+  // console.group("%c✅ WELL-CONFIGURED","font-weight:bold;color:#111");
+  // log("wellConfigured_pct", wcPct + "%");
+  // log("wellConfigured_count", wellConfigured);
+  // log("wellConfigured_detail", `${wellConfigured} of ${identified} identified`);
+  // console.groupEnd();
+
+  /* ---------- NEED ATTENTION / BEFORE CONSENT ---------- */
+  // console.group("%c⚠️ NEED ATTENTION / BEFORE CONSENT","font-weight:bold;color:#111");
+  // log("needAttention_count", needAttention + unknown);
+  // log("misconfigured_count", needAttention);
+  // log("beforeConsent_count", beforeConsent);
+  // log("config_summary", `${wellConfigured} well-configured • ${needAttention+unknown} need attention (${needAttention} misconfigured + ${unknown} unknowns)`);
+  // log("action_needed", beforeConsent>0
+  //     ? `${s.cookieBanner?"The consent banner does not block trackers":"No consent banner is installed"}, and ${beforeConsent} of ${detected} vendors load before the visitor makes a choice. Under GDPR / ePrivacy these must be blocked until consent is given.`
+  //     : `All ${detected} detected vendors are gated behind consent. No action needed.`);
+  // console.groupEnd();
+
+  /* ---------- PROGRESS BAR ---------- */
+  // console.group("%c📶 PROGRESS BAR","font-weight:bold;color:#111");
+  // log("bar_green (width)", greenPct + "%");
+  // log("bar_red (width)", (100 - greenPct) + "%");
+  // console.groupEnd();
+
+  /* ---------- COOKIE COUNTS ---------- */
+  // console.group("%c🔢 COOKIE COUNTS","font-weight:bold;color:#111");
+  // log("totalCookies_count", result.totalCookies);
+  // log("necessary_count", c.necessary||0);
+  // log("functional_count", c.functional||0);
+  // log("analytics_count", c.analytics||0);
+  // log("advertisement_count", c.advertisement||0);
+  // log("other_count", c.other||0);
+  // console.groupEnd();
+
+  /* ---------- CATEGORIES ---------- */
+  // console.group("%c📊 categories_container","font-weight:bold;color:#111");
+  // Object.entries(byCategory).forEach(([cat,n]) => console.log(`   ${cat} · ${n}`));
+  // console.groupEnd();
+
+  /* ---------- VENDOR CARDS ---------- */
+  // console.group("%c🗂️ VENDOR CARDS (result.trackers)","font-weight:bold;color:#111");
+  // vendors.forEach((v,i) => console.log(`   #${i+1}  name: ${v.name}  |  category: ${v.category}  |  owner: ${v.owner}  |  badge: ${v.badge}`));
+  // console.groupEnd();
+
+  /* ---------- NEED-ATTENTION VENDORS ---------- */
+  // console.group("%c⚠️ NEED-ATTENTION VENDORS","font-weight:bold;color:#111");
+  // vendors.filter(v=>!v.wellConfigured).forEach((v,i) => console.log(`   #${i+1}  ${v.name}  |  ${v.category}  |  ${v.owner}`));
+  // console.groupEnd();
+
+  /* ---------- UNKNOWN VENDORS ---------- */
+  // console.group("%c❓ UNKNOWN VENDORS (result.unknownVendors)","font-weight:bold;color:#111");
+  // (result.unknownVendors||[]).forEach((v,i) => console.log(`   #${i+1}  name: ${v.name}  |  category: ${v.category}  |  company: ${v.company}`));
+  // console.groupEnd();
+
+  /* ---------- COOKIES ---------- */
+  // console.group("%c📃 COOKIES (result.cookies)","font-weight:bold;color:#111");
+  // (result.cookies||[]).forEach((ck,i) => console.log(`   #${i+1}  ${ck.name}  |  ${ck.category}  |  ${ck.domain}  |  ${ck.duration}  |  ${ck.provider}`));
+  // console.groupEnd();
+
+
+  
+  /* ---------- dispalying values in this function ---------- */
+  //vendor count and vemdorCount_meta
+  const vendorCountEl = document.getElementById("vendor_count");
+  if (vendorCountEl) {
+      vendorCountEl.textContent = detected;
+  }
+  const vendorCountMetaEl = document.getElementById("vendorCount_meta");
+  if (vendorCountMetaEl) {
+      vendorCountMetaEl.textContent = `${detected} vendors detected`;
+  }
+  
+
+  //beforeconsent count
+  const beforeConsentEl = document.getElementById("beforeConsent_count");
+  if (beforeConsentEl) {
+      beforeConsentEl.textContent = result.totalCookies || 0;;
+  }
+
+  //wellconfigured percentage
+  const wellConfiguredPctEl = document.getElementById("wellConfigured_pct");
+  if (wellConfiguredPctEl) {
+      wellConfiguredPctEl.textContent = result.grade;
+  }
+
+  //well configured detail
+  const wellConfiguredDetailEl = document.getElementById("wellConfigured_detail");
+  if (wellConfiguredDetailEl) {
+      wellConfiguredDetailEl.textContent =
+          `${wellConfigured} of ${identified} identified`;
+  }
+
+  // Well Configured count
+  const wellConfiguredEl = document.getElementById("wellConfigured_count");
+  if (wellConfiguredEl) {
+      wellConfiguredEl.textContent = wellConfigured;
+  }
+  
+  // Need Attention count
+  const needAttentionEl = document.getElementById("needAttention_count");
+  if (needAttentionEl) {
+      needAttentionEl.textContent = needAttention + unknown;
+  }
+
+  //misconfigured and unknown count
+  const misconfiguredUnknownEl = document.getElementById("misconfigured_unknown_count");
+  if (misconfiguredUnknownEl) {
+      misconfiguredUnknownEl.textContent =
+          `(${needAttention} misconfigured + ${unknown} unknown)`;
+  }
+
+
+  //progressbar width
+  const greenBar = document.getElementById("greenBar");
+	const redBar = document.getElementById("redBar");
+
+  if (greenBar) {
+      greenBar.style.width = `${greenPct}%`;
+  }
+  
+  if (redBar) {
+      redBar.style.width = `${100 - greenPct}%`;
+  }
+
+
+  //--Populate Before Consent Vendor Cards
+  const beforeConsentVendors = beforeConsent > 0
+  ? [
+      ...vendors.filter(v => !v.wellConfigured),
+      ...(result.unknownVendors || []).map(v => ({
+          name: v.name,
+          category: "Unknown",
+          owner: v.company || "Unknown"
+      }))
+    ]
+  : [];
+ 	//console.log("vendorsThatNeddAttention",beforeConsentVendors)
+
+  const vendorWrapper = document.getElementById("vendorWrapper");
+  if (beforeConsent > 0) {
+      vendorWrapper.style.display = "block"; // or "flex"
+  }
+  
+  // Action needed banner
+    const actionNeeded = document.getElementById("actionneeded");
+
+  if (beforeConsent > 0) {
+      actionNeeded.style.display = "block";   // or "flex" depending on your layout
+  
+      const vendorNames = beforeConsentVendors
+          .filter(v => v.category !== "Unknown")
+          .slice(0, 2)
+          .map(v => v.name);
+  
+      const unknownCount = beforeConsentVendors.filter(v => v.category === "Unknown").length;
+  
+      const bannerFound = result.domSignal?.cookieBanner === true;
+  
+      const actionText = bannerFound
+          ? `${beforeConsent} of ${detected} vendors load before the visitor makes a choice — including ${vendorNames.join(", ")} and ${unknownCount} unmapped trackers. Under GDPR / ePrivacy these must be blocked until consent is given.`
+          : `No consent banner is installed, and ${beforeConsent} of ${detected} vendors load before the visitor makes a choice — including ${vendorNames.join(", ")} and ${unknownCount} unmapped trackers. Under GDPR / ePrivacy these must be blocked until consent is given.`;
+  
+      document.getElementById("actionNeeded_para").textContent = actionText;
+  }
+
+  //adding vendor cards
+  const container = document.getElementById("vendors_container");
+  const template = document.getElementById("vendor_template");
+  
+  if (container && template) {
+
+    container.style.visibility = "hidden";
+
+    container.innerHTML = "";// Remove existing generated cards
+  
+    beforeConsentVendors.slice(0, 2).forEach(vendor => {
+  
+      const card = template.cloneNode(true);
+  
+      card.removeAttribute("id");
+      card.style.display = "flex";
+
+      const iconEl = card.querySelector(".vendor-icon");
+      const nameEl = card.querySelector(".vendor-name");
+      const categoryEl = card.querySelector(".vendor-category");
+      const ownerEl = card.querySelector(".vendor-owner");
+
+      if (iconEl) iconEl.textContent = (vendor.name || "?").charAt(0).toUpperCase();
+      if (nameEl) nameEl.textContent = vendor.name;
+      if (categoryEl) categoryEl.textContent = vendor.category;
+      if (ownerEl) ownerEl.textContent = vendor.owner;
+  
+      container.appendChild(card);
+
+    });
+
+     // Show after everything is ready
+    container.style.visibility = "visible";
+  }
+
+  //blur card
+  const blurMeta = document.getElementById("blurPart_card_meta")
+  if(blurMeta) blurMeta.textContent = `Sign up free to access all ${detected} vendors — configuration status, categories, and step-by-step fixes for every one.`
+
+  document.getElementById("blurPart_signUp").addEventListener("click", () => {
+        window.open("https://accounts.consentbit.com/signup","_blank","noopener,noreferrer");
+  });
+
+  const blurContainer = document.getElementById("blurGate_cards"); 
+  // if (beforeConsentVendors.length <= 2) 
+  // 		{ blurContainer.style.visibility = "hidden"; } 
+  // else 
+  // 		{ blurContainer.style.visibility = "visible"; }
+  if (beforeConsentVendors.length > 2) {
+      blurContainer.style.visibility = "visible";
+  }
+
+  
+    if (blurContainer && template) {
+  
+      blurContainer.innerHTML = "";
+  
+      beforeConsentVendors.slice(2).forEach(vendor => {
+  
+          const card = template.cloneNode(true);
+  
+          card.removeAttribute("id");
+          card.style.display = "flex";
+  
+          const iconEl = card.querySelector(".vendor-icon");
+          const nameEl = card.querySelector(".vendor-name");
+          const categoryEl = card.querySelector(".vendor-category");
+          const ownerEl = card.querySelector(".vendor-owner");
+  
+          if (iconEl) {
+              iconEl.textContent = (vendor.name || "?")
+                  .charAt(0)
+                  .toUpperCase();
+          }
+  
+          if (nameEl) {
+              nameEl.textContent = vendor.name;
+          }
+  
+          if (categoryEl) {
+              categoryEl.textContent = vendor.category;
+          }
+  
+          if (ownerEl) {
+              ownerEl.textContent = vendor.owner;
+          }
+  
+          blurContainer.appendChild(card);
       });
+  }
 
-      if (!response.ok || !response.body) {
-        throw new Error('Scan request failed: ' + response.status);
-      }
+  //readyToFix
+  document.getElementById("readyToFix_btn").addEventListener("click", () => {
+       window.open("https://accounts.consentbit.com/login", "_blank","noopener,noreferrer")
+  });
 
-      // ---- read the SSE stream ----
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let finalResult = null;
 
-      // called once per progress event coming from the worker
-      // human-readable label for each step the worker can send
-      const STEP_LABELS = {
-        resolving:    'Resolving domain & TLS certificates',
-        loading:      'Loading home page and embedded scripts',
-        capturing:    'Capturing HTTP, JavaScript and local-storage cookies',
-        matching:     'Matching against 100,000+ cookie database',
-        categorizing: 'Categorizing cookies and detecting third parties',
-        report:       'Compiling your audit report',
-        done:         'Scan complete',
-        error:        'Scan failed',
-      };
+   // Category counts
+  const trackerCounts = result.trackerCounts || {};
 
-      // remember the previous step so we can mark it "completed"
-      let prevStep = null;
-      let prevStepEl = null;
+  document.getElementById("analytics_count").textContent =
+    trackerCounts.analytics || 0;
+  
+  document.getElementById("advertisement_count").textContent =
+    trackerCounts.advertising || 0;
+  
+  document.getElementById("necessary_count").textContent =
+    trackerCounts.necessary || 0;
+  
+  document.getElementById("functional_count").textContent =
+    trackerCounts.functional || 0;
+  
+  document.getElementById("other_count").textContent =
+    result.unknownVendors?.length || 0;
+  
+  
+})();
 
-      function onProgress(msg) {
-        const label = STEP_LABELS[msg.step] || msg.message || msg.step;
 
-        // ---- 1. console each step ----
-        // the previous step is finished once the next event arrives
-        if (prevStep && prevStep !== msg.step) {
-          console.log('✅ completed:', STEP_LABELS[prevStep] || prevStep);
-        }
-        console.log('⏳ ' + (msg.progress ?? '') + '% →', label);
-        prevStep = msg.step;
 
-        // ---- 2. set the status text in the UI ----
-        const statusEl = document.getElementById('scan_status');
-        if (statusEl) statusEl.textContent = label;
+document.addEventListener("DOMContentLoaded", () => {
 
-        // ---- 3. move the progress bar ----
-        const barEl = document.getElementById('scan_progress');
-        if (barEl && typeof msg.progress === 'number') {
-          barEl.style.width = msg.progress + '%';
-        }
+  	const result = JSON.parse(sessionStorage.getItem("scan_result") || "null");
+  	if (!result) return;
 
-        // ---- 4. (optional) mark each step row in a checklist ----
-        // mark the step that just started as "active"
-        const stepEl = document.getElementById('step_' + msg.step);
-        if (stepEl) {
-          stepEl.classList.add('active');
-        }
-        // and mark the previous step row as "done"
-        if (prevStepEl) {
-          prevStepEl.classList.remove('active');
-          prevStepEl.classList.add('completed');
-        }
-        prevStepEl = stepEl;
-      }
+  	//back to previousPage
+  	document.getElementById("previousPage").addEventListener("click", () => {
+        window.location.href = "/cookie-checker";
+    });
 
-      // keep reading until we get the result (or the worker closes the stream)
-      let finished = false;
-      while (!finished) {
-        const { value, done } = await reader.read();
-        if (done) break;   // stream closed by the worker
+    // Domain
+    const domainTop = document.getElementById("domain_top");
+    const domainBottom = document.getElementById("domain_bottom");
 
-        buffer += decoder.decode(value, { stream: true });
+    if (domainTop) domainTop.textContent = result.scannedDomain || "-";
+    if (domainBottom) domainBottom.textContent = result.scannedDomain || "-";
 
-        // SSE messages are separated by a blank line
-        const parts = buffer.split('\n\n');
-        buffer = parts.pop();   // last piece may be incomplete — keep it
+    // Today's date
+    const today = new Date();
 
-        for (const part of parts) {
-          const line = part.replace(/^data: /, '').trim();
-          if (!line) continue;
+    const dateEl = document.getElementById("report_date");
+    if (dateEl) {
+        dateEl.textContent = today.toLocaleDateString("en-GB", {
+            day: "numeric",
+            month: "long",
+            year: "numeric"
+        });
+    }
 
-          const msg = JSON.parse(line);
-          onProgress(msg);
+    // Cookie banner
+    const bannerFound = result.domSignal?.cookieBanner === true;
 
-          if (msg.step === 'error') {
-            throw new Error(msg.message || 'Scan failed');
-          }
-          if (msg.step === 'done') {
-            finalResult = msg.result;
-            finished = true;   // got everything — stop reading
-            break;
-          }
-        }
-      }
-      try { await reader.cancel(); } catch {}   // release the stream
+    const bannerEl = document.getElementById("cookieBanner_status");
+    if (bannerEl) {
+        bannerEl.textContent = bannerFound ? "Found" : "Not found";
+    }
 
-      if (!finalResult) {
-        throw new Error('Scan ended without a result');
-      }
+    // CMP
+    const cmps = result.domSignal?.cmp || [];
 
-      console.log(finalResult);
+    const cmpText =
+        cmps.length > 0
+            ? `Detected CMP: ${cmps.map(cmp => cmp.name).join(", ")}`
+            : "No CMP found";
 
-      // Save result for audit page
-      localStorage.setItem('scan_result', JSON.stringify(finalResult));
+    const cmpEl = document.getElementById("cmp_status");
+    if (cmpEl) {
+        cmpEl.textContent = cmpText;
+    }
 
-      // Redirect to report page
-      //window.location.href = "/audit-report";
-    } catch (error) {
-      console.error(error);
-      const errorMsg = document.getElementById('url_error');
-      if (errorMsg) {
-        errorMsg.textContent = error.message;
-        errorMsg.style.display = 'block';
-      }
-    }
-  };
+    // Grade
+    const gradeEl = document.getElementById("grade");
+    if (gradeEl) {
+        gradeEl.textContent = result.grade || "-";
+    }
+
+   
+
+    console.log("Page data populated successfully");
+
+});
+
 </script>
+
+
