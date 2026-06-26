@@ -778,44 +778,10 @@ export default {
 
 		await send("report", { message: "Compiling your audit report", progress: 95 });
 
-
-		//table_result
-		const reportId = crypto.randomUUID();
-		const table_result = {
-			scannedUrl: targetUrl,
-    			scannedDomain: new URL(targetUrl).hostname.replace(/^www\./, ''),
-				totalCookies: cookies.length,
-				counts,
-				trackerCounts,
-				cookies,
-				domains: [...requestDomains],
-				totalDomains: requestDomains.size,
-				trackers: trackerResult.uniqueTrackers,
-				unknownVendors: trackerResult.unknownVendors,          // unmapped domains
-				totalUnknown: trackerResult.totalUndetectedTrackers,   // count for "10 unknowns"
-				domSignal: domSignals,
-				grade: grade
-		};
-
-		await env.cookie_scanner_db.prepare(`
-			INSERT INTO scan_reports
-			(id, scanned_url, report_data)
-			VALUES (?, ?, ?)
-		`)
-		.bind(
-			reportId,
-			targetUrl,
-			JSON.stringify(table_result)
-		)
-		.run();
-
-
-
 		// final result — the same object you returned before, now as the "done" event
 		await send("done", {
 			progress: 100,
 			result: {
-				reportId,
 				scannedUrl: targetUrl,
     			scannedDomain: new URL(targetUrl).hostname.replace(/^www\./, ''),
 				totalCookies: cookies.length,
