@@ -1,0 +1,453 @@
+
+<script>
+  
+(function consoleAllMappings() {
+
+  const result = JSON.parse(sessionStorage.getItem("scan_result") || "null");
+  if (!result || !result.trackers) { console.error("❌ No scan_result found"); return; }
+
+  // Build the webapp auth URL, carrying the scan's report id so the signup/login
+  // flow can email the PDF report. Works cross-domain via ?scanId=.
+  const WEBAPP_BASE = "https://consentbit-webapp-frontend-test.pages.dev";
+  const cbReportId = result.reportId || sessionStorage.getItem("cb_report_id") || "";
+  const cbAuthUrl = (path) =>
+    WEBAPP_BASE + path + (cbReportId ? "?scanId=" + encodeURIComponent(cbReportId) : "");
+
+  /* ---------- derive ---------- */
+  const TRACKING = ["analytics", "marketing", "advertis", "behavioral"];
+  const s = result.domSignal || {};
+  const gated = !!(s.cookieBanner && s.rejectButton);
+  const c = result.counts || {};
+
+  const vendors = result.trackers.map(v => {
+    const isTracking = TRACKING.some(x => (v.category||"").toLowerCase().includes(x));
+    return { name:v.name, category:v.category||"Other", owner:v.owner||"Unknown",
+             consentRequired:isTracking, badge:isTracking?"Consent required":"OK",
+             wellConfigured:!(isTracking && !gated) };
+  });
+
+  const identified     = vendors.length;
+  const wellConfigured = vendors.filter(v=>v.wellConfigured).length;
+  const needAttention  = identified - wellConfigured;
+  const unknown        = result.totalUnknown || 0;
+  const detected       = identified + unknown;
+  const wcPct          = identified ? Math.round(wellConfigured/identified*100) : 0;
+  const beforeConsent  = gated ? 0 : (needAttention + unknown);
+  const barTotal       = wellConfigured + needAttention + unknown;
+  const greenPct       = barTotal ? Math.round(wellConfigured/barTotal*100) : 0;
+  const byCategory     = vendors.reduce((a,v)=>{a[v.category]=(a[v.category]||0)+1;return a;},{});
+
+  let score = 0;
+  if (s.cmp?.length)  score += 20;
+  if (s.cookieBanner) score += 20;
+  if (s.rejectButton) score += 20;
+  if (s.privacyLink)  score += 20;
+  if (!result.trackers.some(t=>TRACKING.some(x=>(t.category||"").toLowerCase().includes(x)))) score += 20;
+
+  const log = (id, val) => console.log(`%c${id}%c → ${val}`, "color:#2563eb;font-weight:bold", "color:#0f172a");
+
+  /* ---------- HEADER ---------- */
+  // console.group("%c📋 HEADER","font-weight:bold;color:#111");
+  // log("domain_top", result.scannedDomain);
+  // log("domain_bottom", result.scannedDomain);
+  // log("report_date", new Date().toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric"}));
+  // log("grade", result.grade);
+  // log("score", score + "%");
+  // console.groupEnd();
+
+  /* ---------- BANNER / CMP ---------- */
+  // console.group("%c🍪 BANNER / CMP","font-weight:bold;color:#111");
+  // log("cookieBanner_status", s.cookieBanner ? "Found" : "Not found");
+  // log("cmp_status", (s.cmp&&s.cmp.length) ? `Detected CMP: ${s.cmp.map(x=>x.name).join(", ")}` : "No CMP found");
+  // console.log("   (gated:", gated, ")");
+  // console.groupEnd();
+
+  /* ---------- VENDOR STATS ---------- */
+  // console.group("%c🏢 VENDOR STATS","font-weight:bold;color:#111");
+  // log("detected_count", detected);
+  // log("identified_count", identified);
+  // log("unknown_count", unknown);
+  // console.groupEnd();
+
+  /* ---------- WELL-CONFIGURED ---------- */
+  // console.group("%c✅ WELL-CONFIGURED","font-weight:bold;color:#111");
+  // log("wellConfigured_pct", wcPct + "%");
+  // log("wellConfigured_count", wellConfigured);
+  // log("wellConfigured_detail", `${wellConfigured} of ${identified} identified`);
+  // console.groupEnd();
+
+  /* ---------- NEED ATTENTION / BEFORE CONSENT ---------- */
+  // console.group("%c⚠️ NEED ATTENTION / BEFORE CONSENT","font-weight:bold;color:#111");
+  // log("needAttention_count", needAttention + unknown);
+  // log("misconfigured_count", needAttention);
+  // log("beforeConsent_count", beforeConsent);
+  // log("config_summary", `${wellConfigured} well-configured • ${needAttention+unknown} need attention (${needAttention} misconfigured + ${unknown} unknowns)`);
+  // log("action_needed", beforeConsent>0
+  //     ? `${s.cookieBanner?"The consent banner does not block trackers":"No consent banner is installed"}, and ${beforeConsent} of ${detected} vendors load before the visitor makes a choice. Under GDPR / ePrivacy these must be blocked until consent is given.`
+  //     : `All ${detected} detected vendors are gated behind consent. No action needed.`);
+  // console.groupEnd();
+
+  /* ---------- PROGRESS BAR ---------- */
+  // console.group("%c📶 PROGRESS BAR","font-weight:bold;color:#111");
+  // log("bar_green (width)", greenPct + "%");
+  // log("bar_red (width)", (100 - greenPct) + "%");
+  // console.groupEnd();
+
+  /* ---------- COOKIE COUNTS ---------- */
+  // console.group("%c🔢 COOKIE COUNTS","font-weight:bold;color:#111");
+  // log("totalCookies_count", result.totalCookies);
+  // log("necessary_count", c.necessary||0);
+  // log("functional_count", c.functional||0);
+  // log("analytics_count", c.analytics||0);
+  // log("advertisement_count", c.advertisement||0);
+  // log("other_count", c.other||0);
+  // console.groupEnd();
+
+  /* ---------- CATEGORIES ---------- */
+  // console.group("%c📊 categories_container","font-weight:bold;color:#111");
+  // Object.entries(byCategory).forEach(([cat,n]) => console.log(`   ${cat} · ${n}`));
+  // console.groupEnd();
+
+  /* ---------- VENDOR CARDS ---------- */
+  // console.group("%c🗂️ VENDOR CARDS (result.trackers)","font-weight:bold;color:#111");
+  // vendors.forEach((v,i) => console.log(`   #${i+1}  name: ${v.name}  |  category: ${v.category}  |  owner: ${v.owner}  |  badge: ${v.badge}`));
+  // console.groupEnd();
+
+  /* ---------- NEED-ATTENTION VENDORS ---------- */
+  // console.group("%c⚠️ NEED-ATTENTION VENDORS","font-weight:bold;color:#111");
+  // vendors.filter(v=>!v.wellConfigured).forEach((v,i) => console.log(`   #${i+1}  ${v.name}  |  ${v.category}  |  ${v.owner}`));
+  // console.groupEnd();
+
+  /* ---------- UNKNOWN VENDORS ---------- */
+  // console.group("%c❓ UNKNOWN VENDORS (result.unknownVendors)","font-weight:bold;color:#111");
+  // (result.unknownVendors||[]).forEach((v,i) => console.log(`   #${i+1}  name: ${v.name}  |  category: ${v.category}  |  company: ${v.company}`));
+  // console.groupEnd();
+
+  /* ---------- COOKIES ---------- */
+  // console.group("%c📃 COOKIES (result.cookies)","font-weight:bold;color:#111");
+  // (result.cookies||[]).forEach((ck,i) => console.log(`   #${i+1}  ${ck.name}  |  ${ck.category}  |  ${ck.domain}  |  ${ck.duration}  |  ${ck.provider}`));
+  // console.groupEnd();
+
+
+  
+  /* ---------- dispalying values in this function ---------- */
+  //vendor count and vemdorCount_meta
+  const vendorCountEl = document.getElementById("vendor_count");
+  if (vendorCountEl) {
+      vendorCountEl.textContent = detected;
+  }
+  const vendorCountMetaEl = document.getElementById("vendorCount_meta");
+  if (vendorCountMetaEl) {
+      vendorCountMetaEl.textContent = `${detected} vendors detected`;
+  }
+  
+
+  //beforeconsent count
+  const beforeConsentEl = document.getElementById("beforeConsent_count");
+  if (beforeConsentEl) {
+      beforeConsentEl.textContent = result.totalCookies || 0;;
+  }
+
+  //wellconfigured percentage
+  const wellConfiguredPctEl = document.getElementById("wellConfigured_pct");
+  if (wellConfiguredPctEl) {
+      wellConfiguredPctEl.textContent = result.grade;
+  }
+
+  //well configured detail
+  // const wellConfiguredDetailEl = document.getElementById("wellConfigured_detail");
+  // if (wellConfiguredDetailEl) {
+  //     wellConfiguredDetailEl.textContent =
+  //         `${wellConfigured} of ${identified} identified`;
+  // }
+
+  // Well Configured count
+  const wellConfiguredEl = document.getElementById("wellConfigured_count");
+  if (wellConfiguredEl) {
+      wellConfiguredEl.textContent = wellConfigured;
+  }
+  
+  // Need Attention count
+  const needAttentionEl = document.getElementById("needAttention_count");
+  if (needAttentionEl) {
+      needAttentionEl.textContent = needAttention + unknown;
+  }
+
+  //misconfigured and unknown count
+  const misconfiguredUnknownEl = document.getElementById("misconfigured_unknown_count");
+  if (misconfiguredUnknownEl) {
+      misconfiguredUnknownEl.textContent =
+          `(${needAttention} misconfigured + ${unknown} unknown)`;
+  }
+
+
+  //progressbar width
+  const greenBar = document.getElementById("greenBar");
+	const redBar = document.getElementById("redBar");
+
+  if (greenBar) {
+      greenBar.style.width = `${greenPct}%`;
+  }
+  
+  if (redBar) {
+      redBar.style.width = `${100 - greenPct}%`;
+  }
+
+
+  //--Populate Before Consent Vendor Cards
+  const beforeConsentVendors = beforeConsent > 0
+  ? [
+      ...vendors.filter(v => !v.wellConfigured),
+      ...(result.unknownVendors || []).map(v => ({
+          name: v.name,
+          category: "Unknown",
+          owner: v.company || "Unknown"
+      }))
+    ]
+  : [];
+ 	//console.log("vendorsThatNeddAttention",beforeConsentVendors)
+
+  // const vendorWrapper = document.getElementById("vendorWrapper");
+  // if (beforeConsent > 0) {
+  //     vendorWrapper.style.display = "block"; // or "flex"
+  // }
+
+
+  
+  // Action needed banner
+    const actionNeeded = document.getElementById("actionneeded");
+
+  if (beforeConsent > 0) {
+      actionNeeded.style.display = "block";   // or "flex" depending on your layout
+  
+      const vendorNames = beforeConsentVendors
+          .filter(v => v.category !== "Unknown")
+          .slice(0, 2)
+          .map(v => v.name);
+  
+      const unknownCount = beforeConsentVendors.filter(v => v.category === "Unknown").length;
+  
+      const bannerFound = result.domSignal?.cookieBanner === true;
+  
+      const actionText = bannerFound
+          ? `${beforeConsent} of ${detected} vendors load before the visitor makes a choice — including ${vendorNames.join(", ")} and ${unknownCount} unmapped trackers. Under GDPR / ePrivacy these must be blocked until consent is given.`
+          : `No consent banner is installed, and ${beforeConsent} of ${detected} vendors load before the visitor makes a choice — including ${vendorNames.join(", ")} and ${unknownCount} unmapped trackers. Under GDPR / ePrivacy these must be blocked until consent is given.`;
+  
+      document.getElementById("actionNeeded_para").textContent = actionText;
+  }
+
+
+  
+
+  // Adding cookie cards
+  const container = document.getElementById("vendors_container");
+  const template = document.getElementById("vendor_template");
+  
+  const cookies = [...(result.cookies || [])].sort((a, b) =>
+      (a.category || "").localeCompare(b.category || "")
+  );
+  
+  if (container && template) {
+  
+      container.style.visibility = "hidden";
+      container.innerHTML = "";
+  
+      cookies.slice(0, 2).forEach(cookie => {
+  
+          const card = template.cloneNode(true);
+  
+          card.removeAttribute("id");
+          card.style.display = "flex";
+  
+          const iconEl = card.querySelector(".vendor-icon");
+          const nameEl = card.querySelector(".vendor-name");
+          const categoryEl = card.querySelector(".vendor-category");
+          const ownerEl = card.querySelector(".vendor-owner");
+  
+          // First letter of the domain (ignore leading '.')
+          const domain = (cookie.domain || "-").replace(/^\./, "");
+  
+          if (iconEl) iconEl.textContent = cookie.provider.charAt(0).toUpperCase();
+          if (nameEl) nameEl.textContent = cookie.name || "-";
+          if (categoryEl) categoryEl.textContent = cookie.category || "-";
+          if (ownerEl) ownerEl.textContent = cookie.provider || "-";
+          
+          container.appendChild(card);
+      });
+  
+      container.style.visibility = "visible";
+  }
+  
+
+
+  // Blur card
+  const blurMeta = document.getElementById("blurPart_card_meta");
+    if (blurMeta) {
+        blurMeta.textContent =
+            `Sign up free to access all ${result.totalCookies} cookies — category, domain, and complete details for every cookie.`;
+    }
+    
+    document.getElementById("blurPart_signUp").addEventListener("click", () => {
+        window.open(cbAuthUrl("/signup"), "_blank", "noopener,noreferrer");
+    });
+    
+    const blurContainer = document.getElementById("blurGate_cards");
+    
+    if (cookies.length > 2) {
+        blurContainer.style.visibility = "visible";
+    }
+    
+      if (blurContainer && template) {
+  
+      blurContainer.innerHTML = "";
+  
+      cookies.slice(2).forEach(cookie => {
+  
+          const card = template.cloneNode(true);
+  
+          card.removeAttribute("id");
+          card.style.display = "flex";
+  
+          const iconEl = card.querySelector(".vendor-icon");
+          const nameEl = card.querySelector(".vendor-name");
+          const categoryEl = card.querySelector(".vendor-category");
+          const ownerEl = card.querySelector(".vendor-owner");
+  
+          // First letter of provider
+          if (iconEl) {
+              iconEl.textContent = (cookie.provider || "?")
+                  .charAt(0)
+                  .toUpperCase();
+          }
+  
+          // Cookie name
+          if (nameEl) {
+              nameEl.textContent = cookie.name;
+          }
+  
+          // Cookie category
+          if (categoryEl) {
+              categoryEl.textContent = cookie.category;
+          }
+  
+          // Provider
+          if (ownerEl) {
+              ownerEl.textContent = cookie.provider || "-";
+          }
+  
+          blurContainer.appendChild(card);
+      });
+  }
+
+  //readyToFix
+  document.getElementById("readyToFix_btn").addEventListener("click", () => {
+       window.open(cbAuthUrl("/login"), "_blank","noopener,noreferrer")
+  });
+
+
+   // Category counts
+  // const trackerCounts = result.trackerCounts || {};
+
+  // document.getElementById("analytics_count").textContent =
+  //   trackerCounts.analytics || 0;
+  
+  // document.getElementById("advertisement_count").textContent =
+  //   trackerCounts.advertising || 0;
+  
+  // document.getElementById("necessary_count").textContent =
+  //   trackerCounts.necessary || 0;
+  
+  // document.getElementById("functional_count").textContent =
+  //   trackerCounts.functional || 0;
+  
+  // document.getElementById("other_count").textContent =
+  //   result.unknownVendors?.length || 0;
+
+
+  //cookie category
+	const cookieCounts = result.counts || {};
+
+  document.getElementById("analytics_count").textContent =
+    cookieCounts.analytics || 0;
+  
+  document.getElementById("advertisement_count").textContent =
+    cookieCounts.advertisement || 0;
+  
+  document.getElementById("necessary_count").textContent =
+    cookieCounts.necessary || 0;
+  
+  document.getElementById("functional_count").textContent =
+    cookieCounts.functional || 0;
+  
+  document.getElementById("other_count").textContent =
+    cookieCounts.other || 0;
+  
+  
+  
+})();
+
+
+
+document.addEventListener("DOMContentLoaded", () => {
+
+  	const result = JSON.parse(sessionStorage.getItem("scan_result") || "null");
+  	if (!result) return;
+
+  	//back to previousPage
+  	document.getElementById("previousPage").addEventListener("click", () => {
+        window.location.href = "/cookie-checker";
+    });
+
+    // Domain
+    const domainTop = document.getElementById("domain_top");
+    const domainBottom = document.getElementById("domain_bottom");
+
+    if (domainTop) domainTop.textContent = result.scannedDomain || "-";
+    if (domainBottom) domainBottom.textContent = result.scannedDomain || "-";
+
+    // Today's date
+    const today = new Date();
+
+    const dateEl = document.getElementById("report_date");
+    if (dateEl) {
+        dateEl.textContent = today.toLocaleDateString("en-GB", {
+            day: "numeric",
+            month: "long",
+            year: "numeric"
+        });
+    }
+
+    // Cookie banner
+    const bannerFound = result.domSignal?.cookieBanner === true;
+
+    const bannerEl = document.getElementById("cookieBanner_status");
+    if (bannerEl) {
+        bannerEl.textContent = bannerFound ? "Found" : "Not found";
+    }
+
+    // CMP
+    const cmps = result.domSignal?.cmp || [];
+
+    const cmpText =
+        cmps.length > 0
+            ? `Detected CMP: ${cmps.map(cmp => cmp.name).join(", ")}`
+            : "No CMP found";
+
+    const cmpEl = document.getElementById("cmp_status");
+    if (cmpEl) {
+        cmpEl.textContent = cmpText;
+    }
+
+    // Grade
+    const gradeEl = document.getElementById("grade");
+    if (gradeEl) {
+        gradeEl.textContent = result.grade || "-";
+    }
+
+   
+
+    console.log("Page data populated successfully");
+
+});
+
+</script>

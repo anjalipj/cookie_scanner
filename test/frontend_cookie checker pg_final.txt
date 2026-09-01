@@ -1,0 +1,321 @@
+<script>
+  //hiding the url_error
+  document.getElementById('url_error').style.display = 'none';
+
+  document.getElementById("website_url").addEventListener("keydown", function(e) {
+    if (e.key === "Enter") {
+      e.preventDefault(); // prevent form submission
+      document.getElementById("check_btn").click();
+    }
+  });
+
+  document.getElementById('check_btn').onclick = async function () {
+
+    try {
+      let url = document.getElementById("website_url").value.trim();
+      const errorMsg = document.getElementById("url_error");
+      
+      // Hide previous error
+      errorMsg.style.display = "none";
+      
+      // Empty input
+      if (!url) {
+        errorMsg.style.display = "block";
+        return;
+      }
+      
+      // Add https:// if the user entered only a domain
+      if (!/^https?:\/\//i.test(url)) {
+        url = "https://" + url;
+      }
+      
+      // Validate URL
+      try {
+        const parsed = new URL(url);
+      
+        // Ensure it's a valid hostname
+        if (!parsed.hostname.includes(".")) {
+          throw new Error("Invalid domain");
+        }
+      } catch {
+        errorMsg.style.display = "block";
+        return;
+      }
+
+      
+      // Hide input section
+      document.getElementById('input_section').style.display = 'none';
+
+      // Show crawling card
+      document.getElementById("crawling_section").style.display = "block";
+
+      // Reset progress UI
+      const barEl = document.getElementById('scan_progress');
+      if (barEl) {
+        barEl.style.width = '0%';
+      }
+      const percentageEl = document.getElementById('scan_percentage');
+      if (percentageEl) {
+        percentageEl.textContent = '0%';
+      }
+
+      // Reset all step states
+      [
+        "resolving",
+        "loading",
+        "capturing",
+        "matching",
+        "categorizing",
+        "report"
+      ].forEach(step => {
+      
+        const row = document.getElementById("step_" + step);
+      
+        if (!row) return;
+      
+        const icon = row.querySelector(".ic");
+        const text = row.querySelector(".text-block-37");
+      
+        icon.classList.remove("done", "active");
+        text.classList.remove("done", "active");
+      });
+      
+	
+		
+      // Show domain name on card
+      document.getElementById('domain_name').textContent = 
+        new URL(url).hostname.replace(/^www\./, '')
+
+      // Start scan (the worker streams progress as Server-Sent Events)
+      const response = await fetch('https://scanner.consentbit.com/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          url: url,
+        }),
+      });
+
+      if (!response.ok || !response.body) {
+        throw new Error('Scan request failed: ' + response.status);
+      }
+
+      // ---- read the SSE stream ----
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let finalResult = null;
+
+      // called once per progress event coming from the worker
+      // human-readable label for each step the worker can send
+      const STEP_LABELS = {
+        resolving:    'Resolving domain & TLS certificates',
+        loading:      'Loading home page and embedded scripts',
+        capturing:    'Capturing HTTP, JavaScript and local-storage cookies',
+        matching:     'Matching against 100,000+ cookie database',
+        categorizing: 'Categorizing cookies and detecting third parties',
+        report:       'Compiling your audit report',
+        done:         'Scan complete',
+        error:        'Scan failed',
+      };
+
+      // remember the previous step so we can mark it "completed"
+      let prevStep = null;
+      let prevStepEl = null;
+
+      function updateSteps(currentStep) {
+
+        const steps = [
+          "resolving",
+          "loading",
+          "capturing",
+          "matching",
+          "categorizing",
+          "report"
+        ];
+
+        // Scan completed
+        if (currentStep === "done") {
+      
+          steps.forEach(step => {
+      
+            const row = document.getElementById("step_" + step);
+            if (!row) return;
+      
+            const icon = row.querySelector(".ic");
+            const text = row.querySelector(".text-block-37");
+      
+            icon.classList.remove("active");
+            text.classList.remove("active");
+      
+            icon.classList.add("done");
+            text.classList.add("done");
+          });
+      
+          return;
+        }
+      
+        const currentIndex = steps.indexOf(currentStep);
+      
+        steps.forEach((step, index) => {
+      
+          const row = document.getElementById("step_" + step);
+          if (!row) return;
+      
+          const icon = row.querySelector(".ic");
+          const text = row.querySelector(".text-block-37");
+      
+          icon.classList.remove("done", "active");
+          text.classList.remove("done", "active");
+      
+          if (index < currentIndex) {
+            icon.classList.add("done");
+            text.classList.add("done");
+          }
+          else if (index === currentIndex) {
+            icon.classList.add("active");
+            text.classList.add("active");
+          }
+        });
+      }
+
+
+      function onProgress(msg) {
+        const label = STEP_LABELS[msg.step] || msg.message || msg.step;
+
+        //currentStep updation
+        const currentStepEl = document.getElementById("currentStep");
+        if (currentStepEl) {
+          currentStepEl.textContent = label;
+        }
+
+        updateSteps(msg.step);
+
+        // ---- 1. console each step ----
+        // the previous step is finished once the next event arrives
+        //if (prevStep && prevStep !== msg.step) {
+        // console.log('✅ completed:', STEP_LABELS[prevStep] || prevStep);
+        //}
+        // console.log('⏳ ' + (msg.progress ?? '') + '% →', label);
+        // prevStep = msg.step;
+
+        // ---- 2. set the status text in the UI ----
+        const statusEl = document.getElementById('scan_status');
+        if (statusEl) statusEl.textContent = label;
+
+        // ---- 3. update progress bar + percentage ----
+        if (typeof msg.progress === 'number') {
+        
+          // Progress bar fill
+          const barEl = document.getElementById('scan_progress');
+          if (barEl) {
+            barEl.style.width = msg.progress + '%';
+            barEl.style.transition = 'width 0.6s ease';
+          }
+
+          // Percentage text
+          const percentageEl = document.getElementById('scan_percentage');
+          if (percentageEl) {
+            percentageEl.textContent = msg.progress + '%';
+          }
+        }
+
+        // ---- 4. (optional) mark each step row in a checklist ----
+        // mark the step that just started as "active"
+        const stepEl = document.getElementById('step_' + msg.step);
+        if (stepEl) {
+          stepEl.classList.add('active');
+        }
+        // and mark the previous step row as "done"
+        if (prevStepEl) {
+          prevStepEl.classList.remove('active');
+          prevStepEl.classList.add('completed');
+        }
+        prevStepEl = stepEl;
+      }
+
+      // keep reading until we get the result (or the worker closes the stream)
+      let finished = false;
+      while (!finished) {
+        const { value, done } = await reader.read();
+        if (done) break;   // stream closed by the worker
+
+        buffer += decoder.decode(value, { stream: true });
+
+        // SSE messages are separated by a blank line
+        const parts = buffer.split('\n\n');
+        buffer = parts.pop();   // last piece may be incomplete — keep it
+
+        for (const part of parts) {
+          const line = part.replace(/^data: /, '').trim();
+          if (!line) continue;
+
+          const msg = JSON.parse(line);
+          onProgress(msg);
+
+          if (msg.step === 'error') {
+            throw new Error(msg.message || 'Scan failed');
+          }
+          if (msg.step === 'done') {
+            
+            const barEl = document.getElementById('scan_progress');
+            if (barEl) {
+              barEl.style.width = '100%';
+            }
+            
+            const percentageEl = document.getElementById('scan_percentage');
+            if (percentageEl) {
+              percentageEl.textContent = '100%';
+            }
+            
+            finalResult = msg.result;
+            finished = true;   // got everything — stop reading
+            break;
+          }
+        }
+      }
+      try { await reader.cancel(); } catch {}   // release the stream
+
+      if (!finalResult) {
+        throw new Error('Scan ended without a result');
+      }
+
+      //console.log(finalResult);
+
+      // Display cookie categories
+      const cookieCounts = finalResult.counts || {};
+      
+      document.getElementById("analytics_count").textContent =
+        cookieCounts.analytics || 0;
+      
+      document.getElementById("advertisement_count").textContent =
+        cookieCounts.advertisement || 0;
+      
+      document.getElementById("necessary_count").textContent =
+        cookieCounts.necessary || 0;
+      
+      document.getElementById("functional_count").textContent =
+        cookieCounts.functional || 0;
+      
+      document.getElementById("other_count").textContent =
+        cookieCounts.other || 0;
+
+
+      // Save result for audit page
+      //localStorage.setItem('scan_result', JSON.stringify(finalResult));
+      sessionStorage.setItem("scan_result", JSON.stringify(finalResult));
+
+      // Redirect to report page
+      window.location.href = "/cookie-checker-report";
+      
+    } catch (error) {
+      console.error(error);
+      const errorMsg = document.getElementById('url_error');
+      if (errorMsg) {
+        errorMsg.textContent = error.message;
+        errorMsg.style.display = 'block';
+      }
+    }
+  };
+</script>
